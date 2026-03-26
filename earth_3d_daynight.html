@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Earth with Space Debris</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            width: 100vw;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+        
+        #canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            max-width: 350px;
+            z-index: 10;
+        }
+        
+        #info h2 {
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        
+        #info p {
+            margin: 5px 0;
+            line-height: 1.6;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: white;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 10;
+        }
+        
+        .slider-container {
+            margin: 10px 0;
+        }
+        
+        .slider-container label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        
+        input[type="range"] {
+            width: 150px;
+            cursor: pointer;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 12px;
+            transition: background 0.3s;
+        }
+        
+        button:hover {
+            background: #764ba2;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h2>🌍 Earth with Space Debris</h2>
+        <p><strong>Time:</strong> <span id="time">UTC</span></p>
+        <p><strong>Debris Objects:</strong> <span id="debrisCount">0</span></p>
+        <p><strong>Highlighted:</strong> <span id="debrisName">None</span></p>
+        <p><strong>Altitude:</strong> <span id="debrisAlt">-</span> km</p>
+        <p><strong>Latitude:</strong> <span id="lat">0.0°</span></p>
+        <p><strong>Longitude:</strong> <span id="lon">0.0°</span></p>
+        <p style="font-size: 11px; margin-top: 10px; opacity: 0.8;">
+            <strong>Controls:</strong> Drag to rotate • Scroll to zoom • Click debris for info
+        </p>
+    </div>
+    
+    <div id="controls">
+        <div class="slider-container">
+            <label>Sun Position (Hours)</label>
+            <input type="range" id="sunSlider" min="0" max="24" value="12" step="0.1">
+            <span id="sunValue">12:00</span>
+        </div>
+        <div class="slider-container">
+            <label>Rotation Speed</label>
+            <input type="range" id="rotationSlider" min="0" max="2" value="1" step="0.1">
+            <span id="rotationValue">1.0x</span>
+        </div>
+        <div class="slider-container">
+            <label>Debris Scale: <span id="debrisScaleValue">1.0x</span></label>
+            <input type="range" id="debrisScaleSlider" min="0.5" max="3" value="1" step="0.1">
+        </div>
+        <button id="toggleRotation">Pause Rotation</button>
+        <button id="toggleDebris">Hide Debris</button>
+        <button id="resetView">Reset View</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            10000
+        );
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x000000);
+        document.body.appendChild(renderer.domElement);
+        
+        camera.position.z = 3;
+        
+        // Variables
+        let sunPosition = 12;
+        let rotationSpeed = 0.0005;
+        let isRotating = true;
+        let userRotation = { x: 0, y: 0 };
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        
+        // Debris data
+        let debrisData = [];
+        let debrisMeshes = [];
+        let debrisGroup = new THREE.Group();
+        let showDebris = true;
+        let debrisScale = 1;
+        let selectedDebris = null;
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+        
+        // Create Earth
+        const geometry = new THREE.SphereGeometry(1, 64, 64);
+        
+        // Create canvas texture for Earth
+        function createEarthTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2048;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            
+            // Ocean color
+            ctx.fillStyle = '#1a5f7a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Land masses (simple generation)
+            ctx.fillStyle = '#2d8659';
+            
+            // North America
+            ctx.beginPath();
+            ctx.ellipse(200, 300, 150, 200, -0.3, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // South America
+            ctx.beginPath();
+            ctx.ellipse(300, 500, 80, 120, -0.2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Europe & Africa
+            ctx.beginPath();
+            ctx.ellipse(1000, 300, 200, 250, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Asia
+            ctx.beginPath();
+            ctx.ellipse(1300, 250, 250, 200, 0.2, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Australia
+            ctx.beginPath();
+            ctx.ellipse(1500, 600, 60, 80, 0, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Antarctica
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 900, canvas.width, 124);
+            
+            // Clouds effect
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            for (let i = 0; i < 20; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                ctx.beginPath();
+                ctx.ellipse(x, y, Math.random() * 100 + 50, Math.random() * 40 + 20, 
+                           Math.random() * Math.PI, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearFilter;
+            return texture;
+        }
+        
+        // Create night texture (dark side)
+        function createNightTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2048;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // City lights
+            ctx.fillStyle = 'rgba(255, 200, 0, 0.4)';
+            for (let i = 0; i < 300; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * (canvas.height * 0.7) + canvas.height * 0.15;
+                ctx.fillRect(x, y, Math.random() * 3 + 1, Math.random() * 3 + 1);
+            }
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearFilter;
+            return texture;
+        }
+        
+        const earthTexture = createEarthTexture();
+        const nightTexture = createNightTexture();
+        
+        // Custom shader material to blend day/night maps based on sun direction
+        const vertexShader = `
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            varying vec3 vPosition;
+            void main() {
+                vUv = uv;
+                vNormal = normalize(normalMatrix * normal);
+                vPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const fragmentShader = `
+            uniform sampler2D dayMap;
+            uniform sampler2D nightMap;
+            uniform vec3 sunDirection;
+            uniform float nightIntensity;
+            varying vec2 vUv;
+            varying vec3 vNormal;
+
+            void main() {
+                vec3 dayColor = texture2D(dayMap, vUv).rgb;
+                vec3 nightColor = texture2D(nightMap, vUv).rgb;
+
+                float ndotl = dot(normalize(vNormal), normalize(sunDirection));
+                float light = clamp(ndotl * 0.5 + 0.5, 0.0, 1.0);
+
+                // Soft terminator for smooth day/night transition
+                float terminator = smoothstep(0.0, 0.12, light);
+
+                // Mix day and night maps. Night map contributes as emissive glow.
+                vec3 color = mix(nightColor * nightIntensity, dayColor, terminator);
+
+                // Slight ambient to avoid pure black
+                color += 0.06 * vec3(0.05, 0.07, 0.12);
+
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        const shaderMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                dayMap: { value: earthTexture },
+                nightMap: { value: nightTexture },
+                sunDirection: { value: new THREE.Vector3(1, 0, 0) },
+                nightIntensity: { value: 1.0 }
+            },
+            vertexShader,
+            fragmentShader
+        });
+
+        const earth = new THREE.Mesh(geometry, shaderMaterial);
+        scene.add(earth);
+        scene.add(debrisGroup);
+
+        // Cloud layer (slightly larger sphere with semi-transparent clouds)
+        function createCloudTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2048;
+            canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = 'rgba(255,255,255,0.0)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            for (let i = 0; i < 120; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                ctx.beginPath();
+                ctx.ellipse(x, y, Math.random() * 200 + 50, Math.random() * 60 + 20, Math.random() * Math.PI, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+            texture.magFilter = THREE.LinearFilter;
+            texture.minFilter = THREE.LinearFilter;
+            return texture;
+        }
+
+        const cloudTexture = createCloudTexture();
+        const cloudMaterial = new THREE.MeshLambertMaterial({ map: cloudTexture, transparent: true, opacity: 0.8, depthWrite: false });
+        const cloudMesh = new THREE.Mesh(new THREE.SphereGeometry(1.005, 64, 64), cloudMaterial);
+        scene.add(cloudMesh);
+        
+        // Create stars
+        function createStars() {
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.02 });
+            
+            const starsVertices = [];
+            for (let i = 0; i < 1000; i++) {
+                const x = (Math.random() - 0.5) * 100;
+                const y = (Math.random() - 0.5) * 100;
+                const z = (Math.random() - 0.5) * 100;
+                starsVertices.push(x, y, z);
+            }
+            
+            starsGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(starsVertices), 3));
+            const stars = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(stars);
+        }
+        createStars();
+        
+        // Lighting
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+        const ambientLight = new THREE.AmbientLight(0x333333, 0.5);
+        scene.add(sunLight);
+        scene.add(ambientLight);
+        
+        // Generate synthetic debris data (since we can't load CSV directly in browser)
+        function generateDebrisData() {
+            const debrisObjects = [
+                { name: 'ATLAS CENTAUR 2', lat: 22.65, lon: -112.97, alt: 494.1, color: 0xff0000 },
+                { name: 'THOR AGENA D R/B', lat: -22.87, lon: -79.23, alt: 810.2, color: 0xff6600 },
+                { name: 'SL-3 R/B', lat: 28.93, lon: -48.59, alt: 741.8, color: 0xffaa00 },
+                { name: 'SL-8 R/B', lat: 65.03, lon: -95.37, alt: 713.7, color: 0xffff00 },
+                { name: 'SL-8 R/B', lat: 39.14, lon: -98.70, alt: 562.0, color: 0x00ff00 },
+                { name: 'OAO 2', lat: -14.20, lon: 22.62, alt: 733.6, color: 0x00ffff },
+                { name: 'ISIS 1', lat: -48.13, lon: -139.33, alt: 3120.9, color: 0x0099ff },
+                { name: 'SERT 2', lat: -17.44, lon: 41.49, alt: 1046.4, color: 0x0033ff },
+                { name: 'SL-3 R/B', lat: -78.93, lon: 110.42, alt: 431.4, color: 0x6600ff },
+                { name: 'ASTEX 1', lat: -38.38, lon: -155.56, alt: 742.3, color: 0xff00ff },
+                { name: 'SL-8 R/B', lat: 68.89, lon: 81.89, alt: 946.8, color: 0xff0099 },
+                { name: 'OAO 3', lat: -10.18, lon: 52.78, alt: 689.4, color: 0xff3366 },
+                { name: 'ATLAS CENTAUR R/B', lat: 34.87, lon: -45.47, alt: 618.6, color: 0xffcc00 },
+                { name: 'SL-8 R/B', lat: 54.28, lon: 175.41, alt: 781.3, color: 0x00dd00 },
+                { name: 'SL-3 R/B', lat: 39.00, lon: 89.80, alt: 437.4, color: 0x00ffdd },
+                { name: 'SEASAT 1', lat: 65.48, lon: 63.00, alt: 749.9, color: 0x0099dd },
+            ];
+            return debrisObjects;
+        }
+        
+        // Create debris visualization
+        function createDebris() {
+            debrisData = generateDebrisData();
+            debrisMeshes = [];
+            
+            debrisData.forEach((debris, index) => {
+                // Convert lat/lon to 3D position on sphere
+                const latRad = debris.lat * Math.PI / 180;
+                const lonRad = debris.lon * Math.PI / 180;
+                
+                // Scale altitude to visual size (1 Earth radius = 6371 km)
+                const altitudeScale = debris.alt / 6371;
+                const radius = 1 + altitudeScale * 0.3;
+                
+                const x = radius * Math.cos(latRad) * Math.cos(lonRad);
+                const y = radius * Math.sin(latRad);
+                const z = radius * Math.cos(latRad) * Math.sin(lonRad);
+                
+                // Create debris mesh (small cube)
+                const size = 0.015 * debrisScale;
+                const debrisGeom = new THREE.BoxGeometry(size, size, size);
+                const debrisMat = new THREE.MeshPhongMaterial({ color: debris.color });
+                const debrisMesh = new THREE.Mesh(debrisGeom, debrisMat);
+                
+                debrisMesh.position.set(x, y, z);
+                debrisMesh.userData = { ...debris, index };
+                
+                // Add orbit line
+                const orbitGeometry = new THREE.BufferGeometry();
+                const orbitPoints = [];
+                const orbitRadius = radius;
+                for (let i = 0; i <= 64; i++) {
+                    const angle = (i / 64) * Math.PI * 2;
+                    const px = orbitRadius * Math.cos(latRad) * Math.cos(angle);
+                    const pz = orbitRadius * Math.cos(latRad) * Math.sin(angle);
+                    orbitPoints.push(px, radius * Math.sin(latRad), pz);
+                }
+                orbitGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(orbitPoints), 3));
+                const orbitMaterial = new THREE.LineBasicMaterial({ color: debris.color, transparent: true, opacity: 0.3 });
+                const orbitLine = new THREE.Line(orbitGeometry, orbitMaterial);
+                
+                debrisGroup.add(debrisMesh);
+                debrisGroup.add(orbitLine);
+                debrisMeshes.push(debrisMesh);
+            });
+            
+            document.getElementById('debrisCount').textContent = debrisData.length;
+        }
+        
+        // Update sun position
+        function updateSunPosition() {
+            const angle = (sunPosition / 24) * Math.PI * 2 - Math.PI / 2;
+            const distance = 5;
+            sunLight.position.set(
+                Math.cos(angle) * distance,
+                0,
+                Math.sin(angle) * distance
+            );
+            // Update shader sun direction for day/night blending
+            if (shaderMaterial && shaderMaterial.uniforms && shaderMaterial.uniforms.sunDirection) {
+                const dir = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
+                shaderMaterial.uniforms.sunDirection.value.copy(dir);
+            }
+        }
+        
+        // Mouse controls
+        renderer.domElement.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        
+        renderer.domElement.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const deltaX = e.clientX - previousMousePosition.x;
+            const deltaY = e.clientY - previousMousePosition.y;
+            
+            userRotation.y += deltaX * 0.01;
+            userRotation.x += deltaY * 0.01;
+            
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+        
+        renderer.domElement.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+        
+        // Click detection for debris
+        renderer.domElement.addEventListener('click', (event) => {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(debrisMeshes);
+            
+            if (intersects.length > 0) {
+                selectedDebris = intersects[0].object.userData;
+                document.getElementById('debrisName').textContent = selectedDebris.name;
+                document.getElementById('debrisAlt').textContent = selectedDebris.alt.toFixed(1);
+            }
+        });
+        
+        // Zoom with scroll
+        renderer.domElement.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            camera.position.z += e.deltaY * 0.001;
+            camera.position.z = Math.max(1.5, Math.min(10, camera.position.z));
+        }, { passive: false });
+        
+        // UI Controls
+        const sunSlider = document.getElementById('sunSlider');
+        const rotationSlider = document.getElementById('rotationSlider');
+        const toggleRotationBtn = document.getElementById('toggleRotation');
+        const resetViewBtn = document.getElementById('resetView');
+        const debrisScaleSlider = document.getElementById('debrisScaleSlider');
+        const toggleDebrisBtn = document.getElementById('toggleDebris');
+        
+        sunSlider.addEventListener('input', (e) => {
+            sunPosition = parseFloat(e.target.value);
+            updateSunPosition();
+            const hours = Math.floor(sunPosition);
+            const minutes = Math.round((sunPosition - hours) * 60);
+            document.getElementById('sunValue').textContent = 
+                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+            document.getElementById('time').textContent = 
+                `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')} UTC`;
+        });
+        
+        rotationSlider.addEventListener('input', (e) => {
+            rotationSpeed = parseFloat(e.target.value) * 0.0005;
+            document.getElementById('rotationValue').textContent = e.target.value + 'x';
+        });
+        
+        debrisScaleSlider.addEventListener('input', (e) => {
+            debrisScale = parseFloat(e.target.value);
+            document.getElementById('debrisScaleValue').textContent = debrisScale.toFixed(1) + 'x';
+            // Recreate debris with new scale
+            debrisGroup.clear();
+            createDebris();
+        });
+        
+        toggleRotationBtn.addEventListener('click', () => {
+            isRotating = !isRotating;
+            toggleRotationBtn.textContent = isRotating ? 'Pause Rotation' : 'Resume Rotation';
+        });
+        
+        toggleDebrisBtn.addEventListener('click', () => {
+            showDebris = !showDebris;
+            debrisGroup.visible = showDebris;
+            toggleDebrisBtn.textContent = showDebris ? 'Hide Debris' : 'Show Debris';
+        });
+        
+        resetViewBtn.addEventListener('click', () => {
+            userRotation = { x: 0, y: 0 };
+            camera.position.z = 3;
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (isRotating) {
+                earth.rotation.y += rotationSpeed;
+                debrisGroup.rotation.y += rotationSpeed * 0.8; // Slower debris rotation
+            }
+            
+            earth.rotation.x = userRotation.x;
+            earth.rotation.y += userRotation.y;
+            debrisGroup.rotation.x = userRotation.x;
+            debrisGroup.rotation.y += userRotation.y;
+            userRotation.y = 0; // Reset for next frame
+            
+            // Rotate individual debris objects
+            debrisMeshes.forEach((debris, i) => {
+                debris.rotation.x += 0.01;
+                debris.rotation.y += 0.01;
+            });
+
+            // Keep clouds aligned with Earth's rotation (slightly faster to suggest wind)
+            if (typeof cloudMesh !== 'undefined') {
+                cloudMesh.rotation.y = earth.rotation.y * 1.02;
+                cloudMesh.rotation.x = earth.rotation.x;
+            }
+            
+            // Update info display
+            const centerLat = Math.asin(Math.sin(earth.rotation.x)) * 180 / Math.PI;
+            const centerLon = (earth.rotation.y * 180 / Math.PI) % 360;
+            document.getElementById('lat').textContent = centerLat.toFixed(1) + '°';
+            document.getElementById('lon').textContent = centerLon.toFixed(1) + '°';
+            
+            renderer.render(scene, camera);
+        }
+        
+        createDebris();
+        updateSunPosition();
+        animate();
+    </script>
+</body>
+</html>
