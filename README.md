@@ -1,4 +1,4 @@
-# Space Debris Finder (Python)
+# Space Debris Finder
 
 This small tool fetches public TLE catalogs, computes current sub-satellite locations using Skyfield, performs simple cleaning (dedupe/filter), and can cluster nearby debris using DBSCAN.
 
