@@ -4,7 +4,7 @@ This small tool fetches public TLE catalogs, computes current sub-satellite loca
 
 Usage
 
-#start "c:\Users\Rahul\source\repos\New\debris_3d_anim.html"
+
 #start debris_3d_anim.html
 
 1. Install dependencies (prefer a virtualenv):
@@ -16,7 +16,7 @@ pip install -r requirements.txt
 2. Run the script:
 
 ```bash
-python debris_finder.py --cluster --eps-km 50 --min-samples 3
+python debris_finder.py
 ```
 
 Outputs
