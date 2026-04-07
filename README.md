@@ -6,7 +6,7 @@ Usage
 
 #For Visuals 
 
-start debris_3d_anim.html
+run the line 'start debris_3d_anim.html' , 'start debris_3d.html' and 'start earth_3d_daynight.html' in terminal for visuals.
 
 1. Install dependencies (prefer a virtualenv):
 
