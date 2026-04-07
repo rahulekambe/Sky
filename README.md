@@ -4,8 +4,9 @@ This small tool fetches public TLE catalogs, computes current sub-satellite loca
 
 Usage
 
+# For Visuals 
 
-#start debris_3d_anim.html
+start debris_3d_anim.html
 
 1. Install dependencies (prefer a virtualenv):
 
